@@ -1,0 +1,22 @@
+{
+  "name": "gas-remote-debug",
+  "version": "0.1.0",
+  "description": "Raw CDP remote debugging for Google Apps Script web apps",
+  "private": false,
+  "type": "commonjs",
+  "bin": {
+    "gas-remote-debug": "bin/gas-remote-debug.js"
+  },
+  "scripts": {
+    "check": "node --check bin/gas-remote-debug.js && node --check src/cdp-client.js && node --check src/target-discovery.js && node --check src/context-prober.js && node --check src/safe-eval.js && node --check src/dom-helpers.js && node --check src/profiles/google-apps-script.js"
+  },
+  "keywords": [
+    "cdp",
+    "chrome-devtools-protocol",
+    "google-apps-script",
+    "gas",
+    "oopif",
+    "debugging"
+  ],
+  "license": "MIT"
+}

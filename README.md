@@ -6,19 +6,37 @@ Raw CDP remote debugging for Google Apps Script web apps and other OOPIF-based a
 
 Google Apps Script web apps run inside an OOPIF (Out-Of-Process Iframe) sandbox. The browser shows a wrapper page from `script.googleusercontent.com`, while the actual application runtime lives inside the `userCodeAppPanel` iframe.
 
+### Sibling CDP target, not a child frame
+
+In Chrome DevTools Protocol, the GAS sandbox iframe does **not** appear as a child frame under the outer `/dev` page target. Instead, it appears as a **sibling target** at the same level in `/json/list`.
+
+```
+Chrome /json/list
+├── outer GAS /dev page target     ← visible wrapper only
+└── userCodeAppPanel iframe target ← real app sandbox
+    ├── context A: runtime helpers
+    └── context B: visible DOM
+```
+
+Tools that attach to the browser-level WebSocket, inspect only the first page target, or rely on `page.frames()` will miss the real app entirely. The iframe is not a child of the outer page — it is a separate CDP process sandbox exposed as an independent target.
+
+### Split contexts within the same target
+
+Even after the correct target is found, runtime helpers and visible DOM can live in different execution contexts inside the same target. One context may contain global API functions while another contains the rendered UI.
+
 Most automation tools (including Playwright by default) attach to the outer wrapper page. The outer page does not expose your app's globals, API functions, or rendered UI. This produces false negatives: the tool reports the app as "not loaded" when the runtime is healthy inside the iframe.
 
 ## The Solution
 
 GasRemoteDebug uses raw Chrome DevTools Protocol (CDP) to:
 
-1. **Discover** the actual runtime target through `/json/list` enumeration.
-2. **Connect** directly to the GAS sandbox iframe via WebSocket.
+1. **Enumerate** all CDP targets directly from `/json/list`, not from frame hierarchy.
+2. **Connect** to each page/iframe target via WebSocket — including sibling sandbox targets.
 3. **Probe** every execution context for your app's globals and DOM markers.
-4. **Select** the correct runtime and DOM contexts for evaluation.
-5. **Evaluate** expressions safely with a built-in mutation guard.
+4. **Correlate** runtime and DOM contexts using the Frame-Pair Gate algorithm.
+5. **Return** either a `single-context` pair (runtime + DOM together) or a `paired-context` pair (split across contexts).
 
-The core concept is the **Frame-Pair Gate** — a deterministic algorithm that correlates runtime and DOM execution contexts inside OOPIF sandboxes.
+The core concept is the **Frame-Pair Gate** — a deterministic algorithm that groups findings by `targetId + frameId`, scores each context, and selects the best candidate for evaluation.
 
 ## Quick Start
 
@@ -125,7 +143,7 @@ See [docs/safety.md](docs/safety.md) for details.
 
 ## Status
 
-**Current: Initial local scaffold.** Not yet production hardened. No tests, no CI, no npm package.
+**Current: Active development.** 79 unit tests pass. Not yet production hardened. No CI pipeline. Not published to npm.
 
 ## License
 

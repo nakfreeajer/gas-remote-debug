@@ -8,6 +8,20 @@ OOPIF (Out-Of-Process Iframe) is a Chrome architecture where cross-origin iframe
 - The parent page and the OOPIF cannot directly access each other's globals.
 - CDP sees them as separate targets with separate execution contexts.
 
+## Sibling CDP Target Behavior
+
+A key characteristic of OOPIF in CDP is that the iframe target may appear as a **sibling** of the outer page in `/json/list`, not as a child frame. This is especially common with Google Apps Script sandbox iframes (`userCodeAppPanel`).
+
+```
+CDP /json/list (simplified)
+├── type: page, url: script.google.com/.../dev       ← wrapper
+└── type: iframe, url: ...userCodeAppPanel            ← real app
+```
+
+Tools that use `page.frames()` or assume the first page target is the real runtime will miss the OOPIF sandbox entirely because it is not a DOM child frame — it is a separate CDP target at the same level as the outer page.
+
+GasRemoteDebug avoids this by scanning `/json/list` directly and connecting to every page and iframe target it finds, rather than navigating a frame tree.
+
 ## Why Context Discovery Matters
 
 When validating a web app inside an OOPIF sandbox (like Google Apps Script), two critical pieces may live in different CDP execution contexts within the same target:

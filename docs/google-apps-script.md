@@ -15,7 +15,11 @@ Most browser automation tools (including Playwright in default mode) attach to t
 - Your rendered UI components
 - Your application state
 
-This leads to false negatives during validation: the tool reports that the app is "not loaded" or "blank" when the real runtime is actually healthy inside the OOPIF.
+### Sibling target, not a child frame
+
+An additional complication: the GAS sandbox iframe does not appear as a child frame of the outer page. In CDP, it is exposed as a **sibling target** at the same level in `/json/list`. Tools that rely on `page.frames()` will never find the real app because the iframe is not a DOM child — it is a separate CDP target in its own process.
+
+This leads to false negatives during validation: the tool reports that the app is "not loaded" or "blank" when the real runtime is actually healthy inside the OOPIF sandbox.
 
 ## How GasRemoteDebug Solves This
 

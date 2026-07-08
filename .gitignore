@@ -1,0 +1,7 @@
+node_modules/
+.agent-work/
+.env
+.env.local
+*.log
+.DS_Store
+.gas-remote-debug.json

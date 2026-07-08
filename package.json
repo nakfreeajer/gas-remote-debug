@@ -1,0 +1,43 @@
+{
+  "name": "gas-remote-debug",
+  "version": "0.1.0",
+  "description": "Generic raw-CDP helper for Google Apps Script remote debugging and OOPIF frame/context discovery",
+  "main": "src/index.js",
+  "bin": {
+    "gas-remote-debug": "./bin/gas-remote-debug.js"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "src/",
+    "bin/",
+    "examples/",
+    "docs/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "cli": "node bin/gas-remote-debug.js"
+  },
+  "keywords": [
+    "cdp",
+    "chrome-devtools-protocol",
+    "google-apps-script",
+    "gas",
+    "oopif",
+    "iframe",
+    "remote-debugging",
+    "testing",
+    "validation"
+  ],
+  "peerDependencies": {
+    "ws": ">=8"
+  },
+  "peerDependenciesMeta": {
+    "ws": {
+      "optional": true
+    }
+  }
+}

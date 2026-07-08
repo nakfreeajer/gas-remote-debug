@@ -2,7 +2,18 @@
 
 ## Why GAS Needs Special Handling
 
-Google Apps Script web apps use an OOPIF (Out-Of-Process Iframe) sandbox architecture. When you open a GAS web app deployment URL in Chrome, the browser actually creates two rendering contexts:
+Google Apps Script is a powerful platform for building internal tools, automation dashboards, and business applications — all without managing servers. However, debugging and remotely testing a deployed GAS web app is fundamentally different from working with a normal web stack:
+
+- There is no local dev server. The app runs inside Google's serving infrastructure.
+- IDE-based debugging (breakpoints, step-through) is limited to the script editor and does not extend to the deployed web app's runtime.
+- Many runtime, iframe, permission, sandbox, and OOPIF-related issues can only be reproduced and confirmed inside the live browser.
+- The app's code is served through Google-controlled wrappers and sandbox iframes that hide the real runtime from common browser automation tools.
+
+This makes validation slow, manual, and brittle. `gas-remote-debug` was created to address this gap.
+
+### The OOPIF Sandbox
+
+When you open a GAS web app deployment URL in Chrome, the browser creates two rendering contexts:
 
 1. **Outer page** — the `script.googleusercontent.com` wrapper that shows the GAS loading shell.
 2. **Inner iframe (userCodeAppPanel)** — the OOPIF sandbox that runs your actual web app code.

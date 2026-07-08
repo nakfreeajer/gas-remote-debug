@@ -2,6 +2,14 @@
 
 Raw CDP remote debugging for Google Apps Script web apps and other OOPIF-based applications.
 
+## Why this tool exists
+
+Google Apps Script is one of the fastest ways to build internal tools, admin panels, automation dashboards, and lightweight business applications. But many developers hesitate to build serious apps on GAS because the debugging and remote-testing experience is limited compared with normal web stacks.
+
+A deployed GAS web app does not behave like a typical local web app with a full IDE debugging loop. Many runtime, UI, iframe, permission, and sandbox issues can only be confirmed inside the live browser. That makes validation slow, manual, and fragile.
+
+`gas-remote-debug` was created to close that gap. It gives developers a raw Chrome DevTools Protocol path to inspect deployed GAS web apps, discover the real sandboxed app frame, read runtime state, read visible DOM, and build safer validation tools without relying on fragile manual browser checks.
+
 ## The Problem
 
 Google Apps Script web apps run inside an OOPIF (Out-Of-Process Iframe) sandbox. The browser shows a wrapper page from `script.googleusercontent.com`, while the actual application runtime lives inside the `userCodeAppPanel` iframe.

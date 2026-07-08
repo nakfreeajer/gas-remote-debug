@@ -4,6 +4,25 @@ const WS = globalThis.WebSocket || (() => {
 
 const { EvaluationFailedError } = require('./errors');
 
+function addWsListener(ws, eventName, handler) {
+  if (ws && typeof ws.addEventListener === 'function') {
+    ws.addEventListener(eventName, handler);
+    return;
+  }
+  if (ws && typeof ws.on === 'function') {
+    ws.on(eventName, handler);
+    return;
+  }
+  throw new Error('Unsupported WebSocket implementation: missing addEventListener() and on()');
+}
+
+function getMessageData(rawOrEvent) {
+  if (rawOrEvent && typeof rawOrEvent === 'object' && 'data' in rawOrEvent) {
+    return rawOrEvent.data;
+  }
+  return rawOrEvent;
+}
+
 class CdpClient {
   constructor(targetInfo) {
     this.info = targetInfo;
@@ -28,7 +47,7 @@ class CdpClient {
       const timer = setTimeout(() => reject(new Error(`WS connect timeout: ${this.info.webSocketDebuggerUrl}`)), 8000);
       this.ws = new WS(this.info.webSocketDebuggerUrl);
 
-      this.ws.on('open', async () => {
+      addWsListener(this.ws, 'open', async () => {
         clearTimeout(timer);
         try {
           await this._send('Runtime.enable');
@@ -40,16 +59,22 @@ class CdpClient {
         } catch (e) { reject(e); }
       });
 
-      this.ws.on('message', raw => {
-        try { this._onMessage(JSON.parse(raw.toString())); } catch {}
+      addWsListener(this.ws, 'message', rawOrEvent => {
+        try {
+          const data = getMessageData(rawOrEvent);
+          this._onMessage(JSON.parse(data.toString()));
+        } catch {}
       });
 
-      this.ws.on('error', err => {
+      addWsListener(this.ws, 'error', errOrEvent => {
         clearTimeout(timer);
-        if (!this._ready) reject(new Error(`WS error: ${err.message}`));
+        if (!this._ready) {
+          const msg = (errOrEvent && errOrEvent.message) ? errOrEvent.message : String(errOrEvent);
+          reject(new Error(`WS error: ${msg}`));
+        }
       });
 
-      this.ws.on('close', () => { this._ready = false; });
+      addWsListener(this.ws, 'close', () => { this._ready = false; });
     });
   }
 
@@ -140,4 +165,4 @@ class CdpClient {
   }
 }
 
-module.exports = { CdpClient };
+module.exports = { CdpClient, addWsListener, getMessageData };

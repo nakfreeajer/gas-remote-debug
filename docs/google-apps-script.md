@@ -75,6 +75,14 @@ node -e "
 "
 ```
 
+### Debug flags are app-specific
+
+Chrome DevTools Protocol can inspect the loaded page regardless of app query flags. But many GAS apps intentionally hide debug/test helpers in normal mode.
+
+If your app exposes runtime helpers only in debug mode, load the existing browser tab with your app-specific flag before running discovery. Common examples include `?testMode=true`, `?debug=true`, or a custom internal flag.
+
+This keeps production users from seeing test APIs while still allowing controlled validation in development.
+
 ## Important Notes
 
 - The `userCodeAppPanel` target name is specific to Google Apps Script and may change in future Chrome versions.

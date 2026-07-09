@@ -153,6 +153,29 @@ See [docs/safety.md](docs/safety.md) for details.
 
 **Current: Active development.** 79 unit tests pass. Not yet production hardened. No CI pipeline. Not published to npm.
 
+## App-specific debug flags
+
+`gas-remote-debug` does not require a `testMode=true` parameter by itself. It uses Chrome DevTools Protocol to inspect an already-open browser tab.
+
+Some Google Apps Script apps expose their test helpers or runtime inspection APIs only when the app is loaded with a debug query flag, such as:
+
+```text
+/dev?testMode=true
+```
+
+In that case, the flag is part of your app's instrumentation design, not a requirement of this library.
+
+For example, your app might expose globals such as `MY_APP_TEST_API`, `getState()`, or `health()` only when `testMode=true` is present. Without that flag, `gas-remote-debug` may still discover the DOM, but runtime helper detection can fail because the app did not expose those helpers.
+
+If your app also uses other query parameters, combine them normally:
+
+```text
+/dev?testMode=true&tenant=example
+/dev?tenant=example&testMode=true
+```
+
+The order does not matter. Use `?` for the first query parameter and `&` for additional parameters.
+
 ## License
 
 MIT

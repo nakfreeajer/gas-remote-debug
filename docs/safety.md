@@ -1,60 +1,82 @@
 # Safety Model
 
-## Design Principle
+## Design principle
 
-GasRemoteDebug defaults to **read-only, non-destructive behavior**. Every safety measure is designed to prevent accidental mutation of application state.
+GasRemoteDebug defaults to read-only, non-destructive behavior.
 
-## Expression Guard
+Its safety model is designed to reduce accidental mutation of application state while still allowing low-level runtime inspection.
 
-The `ExpressionGuard` class blocks expressions containing known dangerous patterns. By default, any expression containing these tokens is rejected:
+## Expression guard
 
-### Blocked Mutation Patterns
-```
+The `ExpressionGuard` blocks expressions containing obviously dangerous patterns.
+
+Examples include:
+
+### Mutation patterns
+
+```text
 setValue, setValues
 appendRow, insertRow, deleteRow, removeRow
 delete, clear, remove, destroy, truncate, drop
 ```
 
-### Blocked Network Patterns
-```
+### Network or write-like patterns
+
+```text
 fetch(, XMLHttpRequest
 .post(, .put(, .patch(, .delete(, .save(, .write(
 ```
 
-### Blocked Code Execution Patterns
-```
+### Dynamic code execution
+
+```text
 eval(, Function(, import(
 require(, module.exports
 ```
 
-### Blocked System Patterns
-```
+### System patterns
+
+```text
 process.exit, child_process, execSync, exec(
 ```
 
-## Bypassing the Guard
+## Bypassing the guard
 
-Explicit `--allow-dangerous` flag (CLI) or `allowDangerous: true` option (API) is required to skip the guard. The guard still returns warnings for any matched patterns.
+You must explicitly supply `--allow-dangerous` in the CLI, or the equivalent API option, to bypass the guard.
 
-## No Target Mutation
+That override should be treated as expert-only.
 
-The tool never:
-- Creates browser targets or tabs
-- Closes browser targets or tabs
-- Reloads or navigates pages
-- Clicks UI elements
-- Simulates user input
+## No target mutation by default
 
-## CDP Safety Notes
+The normal library flow does not:
 
-Raw Chrome DevTools Protocol can mutate application state if misused. Even seemingly read-only `Runtime.evaluate` calls can trigger side effects if the evaluated expression calls mutation functions.
+- create targets or tabs
+- close tabs or the browser
+- reload or navigate pages
+- click UI controls
+- simulate user input
 
-The safety guard is a first line of defense, not a guarantee. Always validate expressions in a development environment before running against production data.
+## Disconnect-only lifecycle
 
-## Best Practices
+The canonical recursive engine attaches to existing browser targets and disconnects cleanly when done.
 
-1. Always start with `list` or `scan` to verify connectivity.
-2. Use `discover` to find the correct execution contexts.
-3. Test expressions in a development deployment first.
-4. Review the `--allow-dangerous` flag carefully before using it.
-5. Disconnect the client when done to free CDP resources.
+By default it does not:
+
+- recover by navigating to a new state
+- recreate a target
+- close pages as cleanup
+- silently mutate the browser session
+
+## CDP safety notes
+
+Raw Chrome DevTools Protocol can mutate application state if misused. Even a `Runtime.evaluate` call can cause side effects if the expression calls mutation functions.
+
+The safety guard is a first line of defense, not a guarantee. Always validate expressions against a safe environment before using them on sensitive data.
+
+## Best practices
+
+1. Start with target or context discovery to verify connectivity.
+2. Prefer read-only expressions and DOM inspection first.
+3. Use application-specific debug flags only when your app requires them.
+4. Review `--allow-dangerous` carefully before using it.
+5. Disconnect when done to free the CDP session.

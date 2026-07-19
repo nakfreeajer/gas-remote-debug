@@ -2,73 +2,82 @@
 
 ## What is OOPIF?
 
-OOPIF (Out-Of-Process Iframe) is a Chrome architecture where cross-origin iframes run in separate renderer processes. This means:
+OOPIF (Out-Of-Process Iframe) is a Chrome architecture where cross-origin iframes run in separate renderer processes.
 
-- Each OOPIF has its own JavaScript execution context.
-- The parent page and the OOPIF cannot directly access each other's globals.
-- CDP sees them as separate targets with separate execution contexts.
+That means:
 
-## Sibling CDP Target Behavior
+- each OOPIF can have its own JavaScript execution contexts
+- the parent page and the OOPIF do not share globals
+- CDP can expose them as separate targets and sessions
 
-A key characteristic of OOPIF in CDP is that the iframe target may appear as a **sibling** of the outer page in `/json/list`, not as a child frame. This is especially common with Google Apps Script sandbox iframes (`userCodeAppPanel`).
+## Sibling CDP target behavior
 
+A key OOPIF behavior in CDP is that the useful iframe target may appear as a sibling of the outer page, not as a child frame of that page target.
+
+```text
+CDP target model
+|- type: page   -> outer wrapper
+|- type: iframe -> real app target
 ```
-CDP /json/list (simplified)
-├── type: page, url: script.google.com/.../dev       ← wrapper
-└── type: iframe, url: ...userCodeAppPanel            ← real app
-```
 
-Tools that use `page.frames()` or assume the first page target is the real runtime will miss the OOPIF sandbox entirely because it is not a DOM child frame — it is a separate CDP target at the same level as the outer page.
+This is especially common with Google Apps Script sandbox targets such as `userCodeAppPanel`.
 
-GasRemoteDebug avoids this by scanning `/json/list` directly and connecting to every page and iframe target it finds, rather than navigating a frame tree.
+## Why context discovery matters
 
-## Why Context Discovery Matters
-
-When validating a web app inside an OOPIF sandbox (like Google Apps Script), two critical pieces may live in different CDP execution contexts within the same target:
+In OOPIF-based apps, two important capabilities may live in different execution contexts within the same target:
 
 | Component | Location |
 |-----------|----------|
-| App runtime (globals, API functions) | One execution context |
-| Visible DOM (rendered UI, text) | Another execution context |
+| app runtime helpers | one execution context |
+| visible DOM | another execution context |
 
-This is the **split-context** problem. If you evaluate an expression in the wrong context, you get incorrect or empty results.
+If you evaluate in the wrong context, you can get empty or misleading results.
 
-## Frame-Pair Discovery Algorithm
+## Frame-Pair Gate
 
-The Frame-Pair Gate implements a deterministic algorithm:
+The compatibility frame-pair algorithm:
 
-```
-1. Enumerate CDP targets from /json/list.
-2. Filter to page and iframe targets.
-3. Connect to each target via WebSocket.
-4. Enable Runtime, Page, and DOM domains.
-5. Collect all execution contexts.
-6. For each context:
-   a. Ping (1+1) to verify connectivity.
-   b. Run runtime probe — check for configured helper globals.
-   c. Run DOM probe — check for configured CSS selectors and text markers.
-   d. Score the context based on findings.
-7. Group findings by targetId + frameId.
-8. Find the best candidate:
-   - Priority 1: Single context with both runtime helpers and DOM markers.
-   - Priority 2: Paired context — one with runtime, another with DOM.
-9. Return context IDs for evaluation.
-```
+1. enumerates `/json/list`
+2. filters page and iframe targets
+3. connects to each target WebSocket
+4. probes execution contexts for runtime helpers and DOM markers
+5. groups findings by target and frame identity
+6. selects the best single or paired context result
 
-## Context Types
+That path remains available for established workflows.
 
-After probing, each context is classified as:
+## Recursive browser-root discovery
 
-- **full** — Has both runtime helpers and DOM markers. The ideal case.
-- **runtime** — Has runtime helpers but no DOM markers. Use for API calls and state inspection.
-- **dom** — Has DOM markers but no runtime helpers. Use for UI text extraction and element counting.
-- **empty** — Neither runtime helpers nor DOM markers. Skip.
-- **loading-shell** — Shows the loading indicator but no real content. Treated as stale.
+The canonical low-level engine adds a deeper model:
 
-## Safe Evaluation
+1. connect to the browser-level WebSocket from `/json/version`
+2. call `Target.getTargets`
+3. explicitly attach with `Target.attachToTarget`
+4. recursively apply `Target.setAutoAttach`
+5. enable `Runtime` and `Page` for each attached session
+6. track target, session, frame, and context registries
+7. invalidate stale contexts after detach, context clear, or navigation
+8. evaluate through exact `sessionId + executionContextId`
 
-Once the correct contexts are identified:
+This matters for nested OOPIF, replacement-session, and late child-target scenarios where flat target enumeration alone is not enough.
 
-- Use `evalRuntime()` to call API functions and read application state.
-- Use `evalDom()` to read titles, text content, table counts, and other visible UI elements.
-- Both methods check the expression safety guard before evaluation.
+## Context classifications
+
+The runtime logic distinguishes contexts such as:
+
+- runtime-bearing contexts
+- DOM-bearing contexts
+- ignored utility or isolated worlds
+- stale contexts invalidated by detach or navigation
+
+The recursive evaluator returns `STALE_RUNTIME_CONTEXT` when a previously valid context is no longer safe to reuse.
+
+## Safe evaluation
+
+Use the correct evaluation layer for the question you are asking:
+
+- runtime helpers and state reads in the runtime-bearing context
+- visible DOM reads in the DOM-bearing context
+- exact `sessionId + executionContextId` evaluation when using the recursive engine
+
+Avoid treating DOM frame hierarchy or Playwright frame enumeration as authoritative runtime truth for OOPIF-based apps.

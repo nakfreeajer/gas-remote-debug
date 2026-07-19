@@ -2,179 +2,300 @@
 
 Raw CDP remote debugging for Google Apps Script web apps and other OOPIF-based applications.
 
+## Status
+
+Active development. The package is not published to npm yet.
+
+Current validated line:
+
+- Node `>=18`
+- native `WebSocket` when available
+- optional `ws` peer dependency fallback
+- browser-root recursive CDP discovery
+- read-only CLI and API defaults
+- 91 passing tests in the current canonical reconciliation worktree
+
 ## Why this tool exists
 
-Google Apps Script is one of the fastest ways to build internal tools, admin panels, automation dashboards, and lightweight business applications. But many developers hesitate to build serious apps on GAS because the debugging and remote-testing experience is limited compared with normal web stacks.
+Google Apps Script is a fast way to build internal tools, admin panels, automation dashboards, and lightweight business applications. But deployed GAS web apps do not behave like a normal local web app with a complete IDE-debugging loop. Many runtime, iframe, permission, sandbox, and OOPIF issues can only be confirmed inside the live browser.
 
-A deployed GAS web app does not behave like a typical local web app with a full IDE debugging loop. Many runtime, UI, iframe, permission, and sandbox issues can only be confirmed inside the live browser. That makes validation slow, manual, and fragile.
+That makes validation slow and fragile unless you can inspect the real runtime directly.
 
-`gas-remote-debug` was created to close that gap. It gives developers a raw Chrome DevTools Protocol path to inspect deployed GAS web apps, discover the real sandboxed app frame, read runtime state, read visible DOM, and build safer validation tools without relying on fragile manual browser checks.
+`gas-remote-debug` exists to close that gap. It gives you a raw Chrome DevTools Protocol path to inspect an already-open browser session, discover the real sandboxed app runtime, read runtime state, and inspect visible DOM without relying on Playwright frame enumeration as the source of truth.
 
-## The Problem
+## The problem
 
-Google Apps Script web apps run inside an OOPIF (Out-Of-Process Iframe) sandbox. The browser shows a wrapper page from `script.googleusercontent.com`, while the actual application runtime lives inside the `userCodeAppPanel` iframe.
+Google Apps Script web apps commonly involve:
+
+- an outer `/dev` wrapper page
+- a `userCodeAppPanel` sandbox target
+- multiple execution contexts inside the same target
+- runtime helpers and visible DOM that may not live in the same context
 
 ### Sibling CDP target, not a child frame
 
-In Chrome DevTools Protocol, the GAS sandbox iframe does **not** appear as a child frame under the outer `/dev` page target. Instead, it appears as a **sibling target** at the same level in `/json/list`.
+In many GAS setups, the real app runtime does not show up as a normal child frame of the outer page. In CDP, the useful GAS sandbox can appear as a sibling target.
 
-```
-Chrome /json/list
-├── outer GAS /dev page target     ← visible wrapper only
-└── userCodeAppPanel iframe target ← real app sandbox
-    ├── context A: runtime helpers
-    └── context B: visible DOM
+```text
+Chrome target model
+|- outer GAS /dev page target
+|- userCodeAppPanel iframe target
+   |- runtime-bearing execution context
+   |- visible DOM execution context
 ```
 
-Tools that attach to the browser-level WebSocket, inspect only the first page target, or rely on `page.frames()` will miss the real app entirely. The iframe is not a child of the outer page — it is a separate CDP process sandbox exposed as an independent target.
+Tools that assume the first page target is the app, or that `page.frames()` is sufficient runtime truth, can miss the real sandbox entirely.
 
 ### Split contexts within the same target
 
-Even after the correct target is found, runtime helpers and visible DOM can live in different execution contexts inside the same target. One context may contain global API functions while another contains the rendered UI.
+Even after the correct target is found, one context may expose runtime helpers while another contains the rendered UI. A correct debugger must evaluate in the exact owning `sessionId + executionContextId`.
 
-Most automation tools (including Playwright by default) attach to the outer wrapper page. The outer page does not expose your app's globals, API functions, or rendered UI. This produces false negatives: the tool reports the app as "not loaded" when the runtime is healthy inside the iframe.
+## The solution
 
-## The Solution
+GasRemoteDebug now supports two complementary discovery layers:
 
-GasRemoteDebug uses raw Chrome DevTools Protocol (CDP) to:
+1. Frame-Pair Gate compatibility helpers for existing `/json/list`-oriented workflows.
+2. Canonical browser-root recursive Raw CDP discovery through `/json/version`, `Target.getTargets`, explicit `Target.attachToTarget`, and recursive `Target.setAutoAttach`.
 
-1. **Enumerate** all CDP targets directly from `/json/list`, not from frame hierarchy.
-2. **Connect** to each page/iframe target via WebSocket — including sibling sandbox targets.
-3. **Probe** every execution context for your app's globals and DOM markers.
-4. **Correlate** runtime and DOM contexts using the Frame-Pair Gate algorithm.
-5. **Return** either a `single-context` pair (runtime + DOM together) or a `paired-context` pair (split across contexts).
+The recursive engine:
 
-The core concept is the **Frame-Pair Gate** — a deterministic algorithm that groups findings by `targetId + frameId`, scores each context, and selects the best candidate for evaluation.
+- connects to the browser-level CDP WebSocket from `/json/version`
+- enumerates existing targets with `Target.getTargets`
+- explicitly attaches to the selected top target
+- recursively auto-attaches child targets and sessions
+- maintains live target, session, frame, and execution-context registries
+- filters ignored and utility worlds
+- invalidates stale contexts after detach or navigation
+- evaluates through the exact owning `sessionId + executionContextId`
+- disconnects without closing the browser or pages
 
-## Quick Start
+## Quick start
 
 ### Prerequisites
 
 - Node.js 18+
-- Chrome/Chromium/Brave started with `--remote-debugging-port=9222`
-- A Google Apps Script web app open in the browser
+- Chrome, Chromium, or Brave started with `--remote-debugging-port=9222`
+- an already-open target you want to inspect
 
-### List Targets
+### Start Chrome with remote debugging
 
-```bash
-node bin/gas-remote-debug.js list
+Example on Windows:
+
+```powershell
+chrome.exe --remote-debugging-port=9222
 ```
 
-### Run Full Discovery
+### Basic commands
+
+List targets:
 
 ```bash
-node bin/gas-remote-debug.js discover --helpers google,google.script --selector body
+gas-remote-debug list
+gas-remote-debug targets --port 9222
 ```
 
-### Use the API
+Run frame-pair discovery:
+
+```bash
+gas-remote-debug discover --helpers google,google.script --selector body
+```
+
+List recursively discovered contexts:
+
+```bash
+gas-remote-debug contexts --target-url-includes userCodeAppPanel --globals google,google.script --port 9222
+```
+
+Probe for a likely GAS runtime:
+
+```bash
+gas-remote-debug probe --target-url-includes userCodeAppPanel --globals google,google.script --port 9222
+```
+
+Evaluate a read-only expression:
+
+```bash
+gas-remote-debug eval --expression "document.title" --target-url-includes userCodeAppPanel --port 9222
+```
+
+Read DOM text:
+
+```bash
+gas-remote-debug dom-text --selector ".selector" --target-url-includes userCodeAppPanel --port 9222
+```
+
+Count DOM nodes:
+
+```bash
+gas-remote-debug dom-count --selector ".selector" --target-url-includes userCodeAppPanel --port 9222
+```
+
+## Package import
 
 ```js
-const { GasRemoteDebugClient } = require('./src/index');
-
-const client = await GasRemoteDebugClient.connect({
-  runtimeHelpers: ['MY_APP_API', 'app'],
-  domMarkers: {
-    selectors: ['#app', '#content'],
-    textStrings: ['Dashboard']
-  }
-});
-
-console.log(`Runtime context: ${client.pair.runtimeContextId}`);
-const title = await client.evalDom('document.title');
-console.log(`Page title: ${title}`);
-
-client.disconnect();
+const {
+  connectBrowserCdp,
+  attachRecursive,
+  waitForRuntimeContext,
+  evaluateInContext,
+  disconnect,
+  genericGasProfile
+} = require('gas-remote-debug');
 ```
 
-## CLI Commands
+## Public API
+
+The public API exported from `src/index.js` includes:
+
+- `GasRemoteDebugClient`
+- `FramePairGate`
+- `CdpClient`
+- `TargetDiscovery`
+- `ExpressionGuard`
+- `buildRuntimeProbe`
+- `buildDomProbe`
+- `scoreContext`
+- `connectBrowserCdp`
+- `discoverTargets`
+- `attachRecursive`
+- `waitForDefaultContexts`
+- `listRuntimeContexts`
+- `findRuntimeContext`
+- `waitForRuntimeContext`
+- `evaluateInContext`
+- `refreshRegistries`
+- `disconnect`
+- `redactSecrets`
+- `genericGasProfile`
+- `errors`
+
+## CLI commands
+
+Legacy commands remain available:
 
 | Command | Description |
 |---------|-------------|
 | `list` | List CDP targets from `/json/list` |
-| `scan` | Scan all page/iframe targets |
+| `scan` | Scan all page and iframe targets |
 | `discover` | Run full frame-pair gate discovery |
-| `eval` | [experimental] Evaluate expression in discovered runtime context |
-| `help`  | Show help |
+| `eval` | Evaluate in the discovered recursive runtime |
+| `help` | Show help |
 
-### CLI Options
+Recursive read-only commands:
+
+| Command | Description |
+|---------|-------------|
+| `targets` | List browser-root targets discovered through recursive CDP |
+| `contexts` | List runtime contexts from the recursive engine |
+| `probe` | Find and summarize a likely runtime context |
+| `dom-text` | Read text from a selector |
+| `dom-count` | Count nodes matching a selector |
+
+### CLI options
 
 | Option | Description |
 |--------|-------------|
-| `--host <host>` | CDP host (default: 127.0.0.1) |
-| `--port <port>` | CDP port (default: 9222) |
-| `--json` | Output raw JSON |
-| `--config <file>` | Path to JSON config file |
-| `--allow-dangerous` | Skip expression safety guard |
-| `--helpers <list>` | Comma-separated runtime helper names |
-| `--selector <s>` | CSS selector for DOM marker |
-| `--text <t>` | Text string for DOM marker |
+| `--host <host>` | CDP host, default `127.0.0.1` |
+| `--port <port>` | CDP port, default `9222` |
+| `--json` | Emit JSON to stdout |
+| `--config <file>` | Load legacy discovery config |
+| `--allow-dangerous` | Bypass the expression guard |
+| `--helpers <list>` | Legacy frame-pair runtime helper list |
+| `--selector <s>` | DOM selector for frame-pair or DOM commands |
+| `--text <t>` | DOM text marker for frame-pair discovery |
+| `--target-url-includes <text>` | Recursive target filter |
+| `--globals <list>` | Comma-separated globals for recursive probing |
+| `--timeout <ms>` | Timeout for recursive operations |
+| `--profile <name>` | Runtime profile selector |
+| `--target-type <type>` | Target type for recursive attach |
+| `--include-ignored-contexts` | Include ignored or isolated contexts |
 
-## Package Structure
+## Google Apps Script notes
 
+The built-in `google-apps-script` profile remains backward-compatible and suggests:
+
+- target focus on `userCodeAppPanel`
+- runtime helpers `google` and `google.script`
+
+The generic recursive core does not contain project-specific business logic.
+
+### App-specific debug flags
+
+`gas-remote-debug` does not require `testMode=true` by itself.
+
+Some apps expose debug helpers only when loaded with an application-specific query flag, for example:
+
+```text
+/dev?testMode=true
 ```
+
+That flag belongs to your application, not to this library. If your app requires such a flag to expose runtime helpers, open the browser tab with that flag before running discovery.
+
+## Package structure
+
+```text
 gas-remote-debug/
   README.md
   LICENSE
   package.json
-  .gitignore
   src/
-    index.js                # Public API
-    errors.js               # Error types
-    cdp-client.js           # Raw WebSocket CDP transport
-    target-discovery.js     # /json/list enumeration
-    context-prober.js       # Per-context probe expressions
-    frame-pair-gate.js      # Core correlation algorithm
-    safe-eval.js            # Expression safety guard
+    index.js
+    errors.js
+    cdp-client.js
+    target-discovery.js
+    context-prober.js
+    frame-pair-gate.js
+    safe-eval.js
+    dom-helpers.js
+    cdp/
+      browser-connection.js
+      command-router.js
+      target-registry.js
+      context-registry.js
+      recursive-attach.js
+      runtime-evaluator.js
+      redaction.js
+      ws-compat.js
     profiles/
-      google-apps-script.js # GAS defaults
+      google-apps-script.js
+      generic-gas.js
   bin/
-    gas-remote-debug.js     # CLI entry point
+    gas-remote-debug.js
   examples/
-    gas-probe.js            # Basic probe example
-    dom-read.js             # DOM reading example
+    gas-probe.js
+    dom-read.js
   docs/
-    google-apps-script.md   # GAS-specific notes
-    oopif-contexts.md       # OOPIF context discovery
-    safety.md               # Safety model
+    google-apps-script.md
+    oopif-contexts.md
+    safety.md
 ```
 
 ## Safety
 
 GasRemoteDebug defaults to read-only behavior:
 
-- No target creation, closing, or navigation.
-- No automation of clicks or input.
-- Expressions are checked against a mutation pattern guard.
-- The `--allow-dangerous` flag is required for potentially destructive expressions.
+- no target creation
+- no browser or page close
+- no navigation
+- no clicks or typed input
+- expression safety checks before evaluation
+- clean disconnect-only lifecycle
 
 See [docs/safety.md](docs/safety.md) for details.
 
-## Status
+## Manual live integration test
 
-**Current: Active development.** 79 unit tests pass. Not yet production hardened. No CI pipeline. Not published to npm.
+To validate a running browser without navigating or closing it:
 
-## App-specific debug flags
-
-`gas-remote-debug` does not require a `testMode=true` parameter by itself. It uses Chrome DevTools Protocol to inspect an already-open browser tab.
-
-Some Google Apps Script apps expose their test helpers or runtime inspection APIs only when the app is loaded with a debug query flag, such as:
-
-```text
-/dev?testMode=true
+```bash
+node tests/integration/live-gas-runtime.js --port 9222
 ```
 
-In that case, the flag is part of your app's instrumentation design, not a requirement of this library.
+## Additional docs
 
-For example, your app might expose globals such as `MY_APP_TEST_API`, `getState()`, or `health()` only when `testMode=true` is present. Without that flag, `gas-remote-debug` may still discover the DOM, but runtime helper detection can fail because the app did not expose those helpers.
-
-If your app also uses other query parameters, combine them normally:
-
-```text
-/dev?testMode=true&tenant=example
-/dev?tenant=example&testMode=true
-```
-
-The order does not matter. Use `?` for the first query parameter and `&` for additional parameters.
+- [docs/google-apps-script.md](docs/google-apps-script.md)
+- [docs/oopif-contexts.md](docs/oopif-contexts.md)
+- [docs/safety.md](docs/safety.md)
 
 ## License
 

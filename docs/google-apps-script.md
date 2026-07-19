@@ -2,89 +2,93 @@
 
 ## Why GAS Needs Special Handling
 
-Google Apps Script is a powerful platform for building internal tools, automation dashboards, and business applications — all without managing servers. However, debugging and remotely testing a deployed GAS web app is fundamentally different from working with a normal web stack:
+Google Apps Script is a powerful platform for internal tools, automation dashboards, and business applications, but debugging a deployed GAS web app is fundamentally different from working with a normal local web stack.
 
-- There is no local dev server. The app runs inside Google's serving infrastructure.
-- IDE-based debugging (breakpoints, step-through) is limited to the script editor and does not extend to the deployed web app's runtime.
-- Many runtime, iframe, permission, sandbox, and OOPIF-related issues can only be reproduced and confirmed inside the live browser.
-- The app's code is served through Google-controlled wrappers and sandbox iframes that hide the real runtime from common browser automation tools.
+- There is no local dev server.
+- The live app runs inside Google-controlled wrappers and sandbox targets.
+- Many runtime, iframe, permission, and OOPIF issues can only be reproduced inside the live browser.
+- Common browser automation often attaches to the wrong layer and misses the real runtime.
 
-This makes validation slow, manual, and brittle. `gas-remote-debug` was created to address this gap.
+`gas-remote-debug` exists to address that gap.
 
-### The OOPIF Sandbox
+## The OOPIF sandbox
 
-When you open a GAS web app deployment URL in Chrome, the browser creates two rendering contexts:
+When you open a GAS web app in Chrome, you commonly get:
 
-1. **Outer page** — the `script.googleusercontent.com` wrapper that shows the GAS loading shell.
-2. **Inner iframe (userCodeAppPanel)** — the OOPIF sandbox that runs your actual web app code.
+1. an outer page, typically the `/dev` wrapper
+2. an inner sandbox target such as `userCodeAppPanel`
 
-## The Common Failure Mode
+The useful application runtime can live in the sandbox target rather than the visible wrapper.
 
-Most browser automation tools (including Playwright in default mode) attach to the **outer page** because that's the visible top-level document. The outer page does not expose:
+## Common failure mode
 
-- Your app's global functions or variables
-- Your rendered UI components
-- Your application state
+Many tools attach to the visible outer page by default. That page often does not expose:
+
+- your app globals
+- your runtime helper APIs
+- your rendered UI
+- your real application state
 
 ### Sibling target, not a child frame
 
-An additional complication: the GAS sandbox iframe does not appear as a child frame of the outer page. In CDP, it is exposed as a **sibling target** at the same level in `/json/list`. Tools that rely on `page.frames()` will never find the real app because the iframe is not a DOM child — it is a separate CDP target in its own process.
+The GAS sandbox can appear as a sibling CDP target, not as a normal DOM child frame. That means a tool that treats `page.frames()` as runtime truth can report a healthy app as missing or blank.
 
-This leads to false negatives during validation: the tool reports that the app is "not loaded" or "blank" when the real runtime is actually healthy inside the OOPIF sandbox.
+## How GasRemoteDebug solves this
 
-## How GasRemoteDebug Solves This
+GasRemoteDebug supports both the established frame-pair workflow and the canonical recursive browser-root workflow.
 
-GasRemoteDebug uses raw Chrome DevTools Protocol (CDP) to:
+The recursive workflow:
 
-1. Enumerate all CDP targets via `/json/list`.
-2. Filter for the GAS sandbox iframe by URL or title pattern (`userCodeAppPanel`).
-3. Connect directly to the iframe target via WebSocket.
-4. Enable `Runtime` domain and collect all execution contexts.
-5. Probe each context for expected globals (e.g., `google`, `google.script`).
-6. Score contexts based on runtime helpers and DOM markers.
-7. Return the correct context IDs for your app runtime and visible DOM.
+1. connects through `/json/version`
+2. gets the browser-level `webSocketDebuggerUrl`
+3. enumerates existing targets with `Target.getTargets`
+4. explicitly attaches to the selected top target
+5. recursively applies `Target.setAutoAttach`
+6. enables `Runtime` and `Page` in each attached session
+7. discovers live execution contexts
+8. evaluates through the exact `sessionId + executionContextId`
 
-## Default GAS Profile
+This matters because the useful GAS runtime may live in a child target or replacement session even though the outer `/dev` page is the visible tab.
 
-The built-in `google-apps-script` profile targets:
+## Default GAS profile
 
-- **Target:** `userCodeAppPanel` iframe
-- **Runtime helpers:** `google`, `google.script`
-- **DOM context:** Default (`:0`) context
+The built-in `google-apps-script` profile remains backward-compatible and suggests:
 
-## Quick Start for GAS Apps
+- target focus on `userCodeAppPanel`
+- runtime helpers `google` and `google.script`
+
+The generic recursive core does not contain project-specific or business-specific logic.
+
+## Quick start for GAS apps
 
 ```bash
-# List all targets
+# Legacy target listing
 gas-remote-debug list
 
-# Run discovery with the GAS profile
-gas-remote-debug discover --helpers google,google.script --selector body
+# Recursive target discovery
+gas-remote-debug targets --port 9222
+gas-remote-debug contexts --target-url-includes userCodeAppPanel --globals google,google.script --port 9222
+gas-remote-debug probe --target-url-includes userCodeAppPanel --globals google,google.script --port 9222
 
-# Or use the API
-node -e "
-  const { GasRemoteDebugClient } = require('./src/index');
-  GasRemoteDebugClient.connect({
-    runtimeHelpers: ['google', 'google.script'],
-    domMarkers: { selectors: ['body'] }
-  }).then(client => {
-    console.log('Mode:', client.pair.mode);
-    console.log('Runtime context:', client.pair.runtimeContextId);
-    client.disconnect();
-  }).catch(err => console.error(err));
-"
+# Frame-pair compatibility workflow
+gas-remote-debug discover --helpers google,google.script --selector body
 ```
 
-### Debug flags are app-specific
+## Debug flags are app-specific
 
-Chrome DevTools Protocol can inspect the loaded page regardless of app query flags. But many GAS apps intentionally hide debug/test helpers in normal mode.
+Chrome DevTools Protocol does not require app query flags by itself. But some applications intentionally expose runtime helpers only in a debug or test mode.
 
-If your app exposes runtime helpers only in debug mode, load the existing browser tab with your app-specific flag before running discovery. Common examples include `?testMode=true`, `?debug=true`, or a custom internal flag.
+Examples:
 
-This keeps production users from seeing test APIs while still allowing controlled validation in development.
+- `?testMode=true`
+- `?debug=true`
+- a private application-specific flag
 
-## Important Notes
+Those flags belong to the app, not to this library. If your app exposes helpers only in that mode, open the browser tab with the required flag before running discovery.
 
-- The `userCodeAppPanel` target name is specific to Google Apps Script and may change in future Chrome versions.
-- Execution context IDs change on every page reload. Run discovery again after reload.
-- GAS serves pages inside a sandbox iframe with `sandbox` attribute restrictions. Some operations may be limited.
+## Important notes
+
+- `userCodeAppPanel` is a Google Apps Script-specific target convention and could change in future browser behavior.
+- execution context IDs change after reloads and navigation
+- recursive discovery is read-only by default
+- the library disconnects without closing the browser or pages

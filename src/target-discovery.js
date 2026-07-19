@@ -1,5 +1,12 @@
 const http = require('http');
 const { BrowserNotReachableError, NoTargetsFoundError } = require('./errors');
+const { connectBrowserCdp, disconnect } = require('./cdp/browser-connection');
+const { discoverTargets: discoverTargetsRecursive } = require('./cdp/recursive-attach');
+const { summarizeTarget: summarizeTargetSafe } = require('./cdp/target-registry');
+const { summarizeUrl } = require('./cdp/redaction');
+
+const CDP_VERSION_URL = 'http://127.0.0.1:9222/json/version';
+const CDP_LIST_URL = 'http://127.0.0.1:9222/json/list';
 
 class TargetDiscovery {
   constructor({ host = '127.0.0.1', port = 9222 } = {}) {
@@ -84,4 +91,57 @@ class TargetDiscovery {
   }
 }
 
-module.exports = { TargetDiscovery };
+async function discoverTargets(options = {}) {
+  const state = await connectBrowserCdp(options);
+  try {
+    const targets = await discoverTargetsRecursive(state);
+    return {
+      version: state.version,
+      targets: targets.map((target) => ({
+        ...target,
+        id: target.targetId || target.id || '',
+        webSocketDebuggerUrl: target.webSocketDebuggerUrl || ''
+      }))
+    };
+  } finally {
+    await disconnect(state);
+  }
+}
+
+function matchesTarget(target, targetUrlIncludes) {
+  if (!target) return false;
+  const url = String(target.url || '');
+  if (!targetUrlIncludes) return true;
+  return url.indexOf(targetUrlIncludes) !== -1;
+}
+
+function filterTargets(targets, targetUrlIncludes) {
+  return (targets || []).filter((target) => matchesTarget(target, targetUrlIncludes));
+}
+
+function summarizeTarget(target) {
+  if (!target) return null;
+  const safeUrl = target.safeUrl || summarizeUrl(target.url || '');
+  const summary = summarizeTargetSafe({
+    targetId: target.targetId || target.id || '',
+    type: target.type || '',
+    title: target.title || '',
+    attached: target.attached,
+    safeUrl
+  });
+  return {
+    id: target.targetId || target.id || '',
+    targetId: target.targetId || target.id || '',
+    ...summary
+  };
+}
+
+module.exports = {
+  CDP_LIST_URL,
+  CDP_VERSION_URL,
+  TargetDiscovery,
+  discoverTargets,
+  matchesTarget,
+  filterTargets,
+  summarizeTarget
+};

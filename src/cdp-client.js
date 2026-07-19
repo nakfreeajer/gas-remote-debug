@@ -3,25 +3,8 @@ const WS = globalThis.WebSocket || (() => {
 })();
 
 const { EvaluationFailedError } = require('./errors');
-
-function addWsListener(ws, eventName, handler) {
-  if (ws && typeof ws.addEventListener === 'function') {
-    ws.addEventListener(eventName, handler);
-    return;
-  }
-  if (ws && typeof ws.on === 'function') {
-    ws.on(eventName, handler);
-    return;
-  }
-  throw new Error('Unsupported WebSocket implementation: missing addEventListener() and on()');
-}
-
-function getMessageData(rawOrEvent) {
-  if (rawOrEvent && typeof rawOrEvent === 'object' && 'data' in rawOrEvent) {
-    return rawOrEvent.data;
-  }
-  return rawOrEvent;
-}
+const { connectBrowserCdp, disconnect: disconnectBrowserCdp } = require('./cdp/browser-connection');
+const { addWsListener, getMessageData } = require('./cdp/ws-compat');
 
 class CdpClient {
   constructor(targetInfo) {
@@ -98,14 +81,20 @@ class CdpClient {
   }
 
   _send(method, params = {}) {
+    return this.send(method, params);
+  }
+
+  send(method, params = {}, sessionId = null, timeout = 15000) {
     return new Promise((resolve, reject) => {
       const id = ++this._msgId;
       const timer = setTimeout(() => {
         this._pending.delete(id);
         reject(new Error(`CDP timeout: ${method}`));
-      }, 15000);
+      }, timeout);
       this._pending.set(id, { resolve, timer });
-      this.ws.send(JSON.stringify({ id, method, params }));
+      const payload = { id, method, params };
+      if (sessionId) payload.sessionId = sessionId;
+      this.ws.send(JSON.stringify(payload));
     });
   }
 
@@ -165,4 +154,10 @@ class CdpClient {
   }
 }
 
-module.exports = { CdpClient, addWsListener, getMessageData };
+module.exports = {
+  CdpClient,
+  addWsListener,
+  getMessageData,
+  connectBrowserCdp,
+  disconnectBrowserCdp
+};

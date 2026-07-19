@@ -8,6 +8,9 @@ const BUILTIN_PROBES = {
   })`,
 };
 
+const { evaluateInContext, findRuntimeContext, listRuntimeContexts } = require('./cdp/runtime-evaluator');
+const gasProfile = require('./profiles/google-apps-script');
+
 function buildRuntimeProbe(helperNames) {
   const checks = helperNames.map(name =>
     `"${name}": typeof ${name} !== 'undefined'`
@@ -100,5 +103,9 @@ module.exports = {
   BUILTIN_PROBES,
   buildRuntimeProbe,
   buildDomProbe,
-  scoreContext
+  scoreContext,
+  evaluateInContext,
+  findRuntimeContext,
+  listRuntimeContexts,
+  buildProbeExpression: gasProfile.buildProbeExpression
 };

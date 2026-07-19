@@ -3,6 +3,21 @@ const { CdpClient } = require('./cdp-client');
 const { TargetDiscovery } = require('./target-discovery');
 const { ExpressionGuard } = require('./safe-eval');
 const { buildRuntimeProbe, buildDomProbe, scoreContext } = require('./context-prober');
+const {
+  connectBrowserCdp,
+  disconnect
+} = require('./cdp/browser-connection');
+const { discoverTargets, attachRecursive } = require('./cdp/recursive-attach');
+const {
+  waitForDefaultContexts,
+  listRuntimeContexts,
+  findRuntimeContext,
+  waitForRuntimeContext,
+  evaluateInContext,
+  refreshRegistries
+} = require('./cdp/runtime-evaluator');
+const { redactSecrets } = require('./cdp/redaction');
+const genericGasProfile = require('./profiles/generic-gas');
 
 const errors = require('./errors');
 
@@ -67,5 +82,17 @@ module.exports = {
   buildRuntimeProbe,
   buildDomProbe,
   scoreContext,
+  connectBrowserCdp,
+  discoverTargets,
+  attachRecursive,
+  waitForDefaultContexts,
+  listRuntimeContexts,
+  findRuntimeContext,
+  waitForRuntimeContext,
+  evaluateInContext,
+  refreshRegistries,
+  disconnect,
+  redactSecrets,
+  genericGasProfile,
   errors
 };

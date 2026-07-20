@@ -1,0 +1,155 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-matrix:
+    name: ${{ matrix.os }} / Node ${{ matrix.node }} / ${{ matrix.websocketMode }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: 18
+            websocketMode: optional-ws
+          - os: ubuntu-latest
+            node: 22
+            websocketMode: native
+          - os: ubuntu-latest
+            node: 24
+            websocketMode: native
+          - os: windows-latest
+            node: 18
+            websocketMode: optional-ws
+          - os: windows-latest
+            node: 22
+            websocketMode: native
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install optional ws peer
+        if: matrix.websocketMode == 'optional-ws'
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund ws@^8
+
+      - name: Verify WebSocket compatibility mode
+        run: >
+          node -e "const { getWebSocketCtor } = require('./src/cdp/browser-connection');
+          const { addWsListener, getMessageData } = require('./src/cdp-client');
+          if (typeof addWsListener !== 'function' || typeof getMessageData !== 'function') {
+            throw new Error('Compatibility helpers unavailable');
+          }
+          const result = getWebSocketCtor();
+          if (!result || typeof result.WebSocketImpl !== 'function') {
+            throw new Error('No WebSocket constructor resolved');
+          }
+          const mode = process.env.EXPECTED_WS_MODE;
+          if (mode === 'optional-ws' && result.source !== 'ws-package') {
+            throw new Error('Expected ws-package source, got ' + result.source);
+          }
+          if (mode === 'native' && result.source !== 'node-global') {
+            throw new Error('Expected node-global source, got ' + result.source);
+          }
+          console.log('WS_MODE_OK:' + result.source);"
+        env:
+          EXPECTED_WS_MODE: ${{ matrix.websocketMode }}
+
+      - name: Run syntax checks
+        run: npm run check
+
+      - name: Run tests
+        run: npm test
+
+      - name: Verify package import
+        run: node -e "require('.'); console.log('PACKAGE_IMPORT_OK')"
+
+  package-integrity:
+    name: Package Integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Run syntax checks
+        run: npm run check
+
+      - name: Run tests
+        run: npm test
+
+      - name: Dry-run package
+        run: npm pack --dry-run
+
+      - name: Generate machine-readable dry-run report
+        run: npm pack --json --dry-run > npm-pack-report.json
+
+      - name: Validate package contents
+        run: >
+          node -e "const fs = require('fs');
+          const report = JSON.parse(fs.readFileSync('npm-pack-report.json', 'utf8'));
+          const files = new Set((report[0] && report[0].files ? report[0].files : []).map((entry) => entry.path));
+          const required = [
+            'package.json',
+            'README.md',
+            'CHANGELOG.md',
+            'LICENSE',
+            'bin/gas-remote-debug.js'
+          ];
+          for (const item of required) {
+            if (!files.has(item)) throw new Error('Missing required packaged file: ' + item);
+          }
+          const requiredPrefixes = ['src/', 'docs/', 'examples/'];
+          for (const prefix of requiredPrefixes) {
+            if (![...files].some((file) => file.startsWith(prefix))) {
+              throw new Error('Missing required packaged path prefix: ' + prefix);
+            }
+          }
+          const forbiddenPatterns = [
+            /^tests\//,
+            /^node_modules\//,
+            /^\.git\//,
+            /artifact/i,
+            /screenshot/i,
+            /npm-pack-report\.json$/i
+          ];
+          for (const file of files) {
+            if (forbiddenPatterns.some((pattern) => pattern.test(file))) {
+              throw new Error('Forbidden packaged file: ' + file);
+            }
+          }
+          console.log('PACKAGE_CONTENTS_OK');"
+
+      - name: Remove dry-run report
+        run: rm -f npm-pack-report.json

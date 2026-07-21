@@ -31,7 +31,18 @@ function assertWebSocketAvailable(WebSocketImpl) {
   return result;
 }
 
+function getEndpointFromUrl(url) {
+  const parsed = new URL(url);
+  const isHttps = parsed.protocol === 'https:';
+  const port = parsed.port ? Number(parsed.port) : (isHttps ? 443 : 80);
+  return {
+    host: parsed.hostname,
+    port
+  };
+}
+
 function httpGetJson(url, timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS) {
+  const endpoint = getEndpointFromUrl(url);
   return new Promise((resolve, reject) => {
     const request = http.get(url, (response) => {
       let body = '';
@@ -45,10 +56,10 @@ function httpGetJson(url, timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS) {
         }
       });
     });
-    request.on('error', () => reject(new BrowserNotReachableError(DEFAULT_HOST, DEFAULT_PORT)));
+    request.on('error', () => reject(new BrowserNotReachableError(endpoint.host, endpoint.port)));
     request.setTimeout(timeoutMs, () => {
       request.destroy();
-      reject(new BrowserNotReachableError(DEFAULT_HOST, DEFAULT_PORT));
+      reject(new BrowserNotReachableError(endpoint.host, endpoint.port));
     });
   });
 }
@@ -95,6 +106,7 @@ module.exports = {
   DEFAULT_COMMAND_TIMEOUT_MS,
   getWebSocketCtor,
   assertWebSocketAvailable,
+  getEndpointFromUrl,
   httpGetJson,
   connectBrowserCdp,
   disconnect

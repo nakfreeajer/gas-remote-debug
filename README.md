@@ -138,6 +138,7 @@ const {
   attachRecursive,
   waitForRuntimeContext,
   evaluateInContext,
+  sendScopedCdpCommand,
   disconnect,
   genericGasProfile
 } = require('gas-remote-debug');
@@ -164,10 +165,17 @@ The public API exported from `src/index.js` includes:
 - `waitForRuntimeContext`
 - `evaluateInContext`
 - `refreshRegistries`
+- `sendScopedCdpCommand`
 - `disconnect`
 - `redactSecrets`
 - `genericGasProfile`
 - `errors`
+
+### Scoped CDP control
+
+`sendScopedCdpCommand(state, request)` sends a command through the connected browser state's public router after validating the exact target and attached session. Read-only DOM/frame inspection commands are allowlisted. Other commands require an explicit `testAuthorization` object bound to the same `targetId`, with `mode: 'TEST'` and a non-empty `fixtureId`. `Runtime.evaluate` additionally requires a live `executionContextId` owned by that target/session and the same `params.contextId`.
+
+The helper does not grant authorization by itself. Callers must restrict TEST authorization to designated disposable fixtures; it is not a production-target permission mechanism. `timeoutMs` may bound an individual command and must be a positive safe integer.
 
 ## CLI commands
 

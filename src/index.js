@@ -17,6 +17,7 @@ const {
   refreshRegistries
 } = require('./cdp/runtime-evaluator');
 const { redactSecrets } = require('./cdp/redaction');
+const { sendScopedCdpCommand } = require('./cdp/scoped-control');
 const genericGasProfile = require('./profiles/generic-gas');
 
 const errors = require('./errors');
@@ -91,6 +92,7 @@ module.exports = {
   waitForRuntimeContext,
   evaluateInContext,
   refreshRegistries,
+  sendScopedCdpCommand,
   disconnect,
   redactSecrets,
   genericGasProfile,
